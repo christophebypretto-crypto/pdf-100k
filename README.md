@@ -30,6 +30,8 @@ npm run build:win # .exe Windows
 
 Les binaires sont publiés via [GitHub Releases](../../releases). L'auto-update est intégré : les apps installées vérifient au démarrage et proposent la dernière version.
 
+> Le build Mac produit **deux** fichiers : le `.dmg` (installation manuelle) et le `.zip` (mise à jour automatique). Le `.zip` est obligatoire — Squirrel.Mac ne sait pas appliquer un `.dmg`. Sans lui, l'auto-update échoue en silence sur tous les Mac (c'était le cas jusqu'en 0.3.16).
+
 ### Pour installer sur un nouveau poste
 
 - **Mac (Apple Silicon)** : télécharger le `.dmg`, glisser PDF 100K dans Applications, première ouverture en clic-droit → Ouvrir

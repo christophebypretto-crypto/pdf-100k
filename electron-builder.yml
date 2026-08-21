@@ -23,7 +23,14 @@ publish:
     releaseType: release
 mac:
   target:
+    # Le .dmg sert a l'installation manuelle (1re install, reinstallation).
+    # Le .zip est INDISPENSABLE a la mise a jour automatique : Squirrel.Mac ne
+    # sait pas appliquer un .dmg. Sans lui, electron-updater echoue en silence
+    # (ERR_UPDATER_ZIP_FILE_NOT_FOUND) et aucun Mac ne recoit jamais de maj.
     - target: dmg
+      arch:
+        - arm64
+    - target: zip
       arch:
         - arm64
   category: public.app-category.productivity

@@ -6,6 +6,12 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { autoUpdater } from 'electron-updater'
 import { registerPdfHandlers } from './pdf/handlers'
 
+const RELEASES_URL = 'https://github.com/christophebypretto-crypto/pdf-propulse/releases/latest'
+
+// Vrai pendant une verification lancee a la main depuis le menu : les erreurs de
+// mise a jour sont alors affichees, au lieu de passer inapercues.
+let manualUpdateCheck = false
+
 // Path PDF reçu via "Ouvrir avec" / argv en attente que la fenetre soit prete
 let pendingFilePath: string | null = null
 let mainWindow: BrowserWindow | null = null
@@ -106,6 +112,23 @@ function setupAutoUpdater(win: BrowserWindow): void {
       state: 'error',
       message: err.message
     })
+    // Une verification lancee a la main doit toujours donner une reponse, meme
+    // mauvaise : sinon l'utilisateur croit etre a jour alors qu'il ne l'est pas.
+    if (!manualUpdateCheck) return
+    manualUpdateCheck = false
+    dialog
+      .showMessageBox(win, {
+        type: 'warning',
+        title: 'Mise à jour impossible',
+        message: "La mise à jour automatique n'a pas pu aboutir.",
+        detail: `${err.message}\n\nTu peux installer la dernière version à la main : télécharge le .dmg, puis glisse l'app dans Applications en remplaçant l'ancienne.`,
+        buttons: ['Ouvrir la page de téléchargement', 'Fermer'],
+        defaultId: 0,
+        cancelId: 1
+      })
+      .then((r) => {
+        if (r.response === 0) shell.openExternal(RELEASES_URL)
+      })
   })
 
   // Check au demarrage puis toutes les 30 min
@@ -147,21 +170,42 @@ function buildAppMenu(): void {
               {
                 label: 'Vérifier les mises à jour…',
                 click: async () => {
+                  manualUpdateCheck = true
                   try {
                     const r = await autoUpdater.checkForUpdates()
-                    if (!r || !r.updateInfo) {
+                    const dispo = r?.updateInfo?.version
+                    // checkForUpdates renvoie toujours un updateInfo, y compris
+                    // quand rien de neuf : il faut comparer les versions.
+                    if (dispo && dispo !== app.getVersion()) {
+                      dialog.showMessageBox({
+                        type: 'info',
+                        title: 'Mise à jour trouvée',
+                        message: `Propulse PDF ${dispo} est disponible.`,
+                        detail:
+                          'Le téléchargement démarre en arrière-plan. Une fenêtre te proposera de redémarrer quand ce sera prêt.'
+                      })
+                    } else {
+                      manualUpdateCheck = false
                       dialog.showMessageBox({
                         type: 'info',
                         message: "L'app est à jour.",
-                        detail: 'Aucune nouvelle version disponible.'
+                        detail: `Version installée : ${app.getVersion()}.`
                       })
                     }
                   } catch (e) {
-                    dialog.showMessageBox({
-                      type: 'warning',
-                      message: 'Vérification impossible',
-                      detail: e instanceof Error ? e.message : String(e)
-                    })
+                    manualUpdateCheck = false
+                    dialog
+                      .showMessageBox({
+                        type: 'warning',
+                        message: 'Vérification impossible',
+                        detail: `${e instanceof Error ? e.message : String(e)}\n\nTu peux installer la dernière version à la main.`,
+                        buttons: ['Ouvrir la page de téléchargement', 'Fermer'],
+                        defaultId: 0,
+                        cancelId: 1
+                      })
+                      .then((res) => {
+                        if (res.response === 0) shell.openExternal(RELEASES_URL)
+                      })
                   }
                 }
               },
