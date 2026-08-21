@@ -17,6 +17,7 @@ import { createBlankPdf } from './lib/blankPdf'
 import { Annotation, applyAnnotationsToPdf } from './lib/annotations'
 import { FormField, applyFormFieldsToPdf } from './lib/forms'
 import { ocrOnZone } from './lib/searchable'
+import { removeTextTargets } from './lib/contentTextRemoval'
 import type { TextHit } from './lib/textEdit'
 
 export default function App(): JSX.Element {
@@ -591,19 +592,71 @@ export default function App(): JSX.Element {
     [pdfBytes]
   )
 
+  /**
+   * Remplace le PDF en memoire APRES une modification de son contenu, sans
+   * casser le travail en cours : on garde les annotations posees, la page
+   * affichee et la selection. (loadFromBytes, lui, repart de zero.)
+   */
+  const replaceBytesKeepingState = useCallback(async (buf: ArrayBuffer) => {
+    const thumbs = await renderPagesToThumbnails(buf)
+    setPdfBytes(buf)
+    setPages(thumbs)
+    setDirty(true)
+  }, [])
+
   const addEditableAnnotations = useCallback((newAnnots: Annotation[]) => {
     setAnnotations((prev) => [...prev, ...newAnnots])
     setDirty(true)
   }, [])
 
   const handleCommitModifyText = useCallback(
-    (
+    async (
       pageIdx: number,
       hit: TextHit,
       newText: string,
       colors?: { background: string; text: string }
     ) => {
       const isRotated = Math.abs(hit.rotation) > 0.5
+
+      // --- 1) On essaie d'abord de retirer VRAIMENT le texte du PDF ---
+      // Si l'operateur qui le dessine peut sauter sans emporter de texte voisin,
+      // on le supprime : plus de rectangle blanc, le fond d'origine (tableau,
+      // trame, image) reste visible tel quel.
+      if (pdfBytes && hit.rawTransform) {
+        try {
+          const r = await removeTextTargets(pdfBytes, [
+            { pageIndex: pageIdx, transform: hit.rawTransform, str: hit.text }
+          ])
+          if (r.removed > 0) {
+            await replaceBytesKeepingState(r.bytes)
+            if (newText.trim() === '') return // efface : rien a redessiner
+            setAnnotations((prev) => [
+              ...prev,
+              {
+                id: 'a_' + Math.random().toString(36).slice(2, 9),
+                kind: 'text',
+                pageIndex: pageIdx,
+                x: hit.baselineX,
+                y: hit.baselineY,
+                text: newText,
+                size: hit.fontSize,
+                color: colors?.text ?? '#000000',
+                fontFamily: hit.fontFamily,
+                bold: hit.bold,
+                italic: hit.italic,
+                rotation: isRotated ? hit.rotation : 0
+              }
+            ])
+            setDirty(true)
+            return
+          }
+        } catch {
+          // Suppression impossible (PDF chiffre, flux exotique…) : on retombe
+          // sur le masque, comme avant.
+        }
+      }
+
+      // --- 2) Repli : masque couleur-fond par-dessus le texte ---
       const idEraser = 'a_' + Math.random().toString(36).slice(2, 9)
       const idNew = 'a_' + Math.random().toString(36).slice(2, 9)
 
@@ -700,7 +753,7 @@ export default function App(): JSX.Element {
       setAnnotations((prev) => [...prev, replacement])
       setDirty(true)
     },
-    []
+    [pdfBytes, replaceBytesKeepingState]
   )
 
   const rotatePages = useCallback(

@@ -12,6 +12,7 @@
 - OCR Tesseract local gratuit (FR + EN) — page entière, zone à dessiner, ou tout le PDF en recherchable
 - OCR + texte modifiable : crée des annotations éditables par-dessus le scan
 - Formulaires : champs texte et cases à cocher embarqués en AcroForm
+- Suppression réelle de texte : l'outil Modifier et la boîte « Supprimer un texte récurrent » retirent le texte du flux de contenu du PDF (filigrane BROUILLON, mention obsolète…) au lieu de poser un rectangle blanc dessus — ce qu'il y a derrière reste intact, et le texte n'est plus ni affiché ni copiable
 - Sauvegarde directe sur le fichier d'origine ou Enregistrer sous
 
 ## Développement

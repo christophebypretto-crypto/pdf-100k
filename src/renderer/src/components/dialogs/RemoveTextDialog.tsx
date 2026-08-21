@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import Dialog from './Dialog'
-import { findTextOccurrences, removeTextFromPdf } from '../../lib/textRemoval'
+import { countRemovableText, removeTextByContent } from '../../lib/contentTextRemoval'
 
 interface Props {
   pdfBytes: ArrayBuffer
@@ -13,6 +13,7 @@ export default function RemoveTextDialog({ pdfBytes, onClose, onDone }: Props): 
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [previewCount, setPreviewCount] = useState<number | null>(null)
   const [previewPages, setPreviewPages] = useState<number[]>([])
+  const [samples, setSamples] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -21,14 +22,17 @@ export default function RemoveTextDialog({ pdfBytes, onClose, onDone }: Props): 
     let cancelled = false
     if (!text.trim()) {
       setPreviewCount(null)
+      setSamples([])
       return
     }
     const handle = setTimeout(async () => {
       try {
-        const r = await findTextOccurrences(pdfBytes, text, { caseSensitive })
+        const r = await countRemovableText(pdfBytes, text, { caseSensitive })
         if (!cancelled) {
           setPreviewCount(r.count)
           setPreviewPages(r.pagesAffected)
+          setSamples(r.samples)
+          setError(null)
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Erreur de recherche')
@@ -40,13 +44,19 @@ export default function RemoveTextDialog({ pdfBytes, onClose, onDone }: Props): 
     }
   }, [text, caseSensitive, pdfBytes])
 
-  async function doRemove() {
+  async function doRemove(): Promise<void> {
     if (!text.trim()) return
     setBusy(true)
     setError(null)
     try {
-      const r = await removeTextFromPdf(pdfBytes, text, { caseSensitive })
-      onDone(r.bytes, r.removedCount)
+      const r = await removeTextByContent(pdfBytes, text, { caseSensitive })
+      if (r.removed === 0) {
+        setError(
+          "Rien n'a pu être supprimé sans emporter du texte voisin. Le PDF n'a pas été modifié."
+        )
+        return
+      }
+      onDone(r.bytes, r.removed)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur')
     } finally {
@@ -56,7 +66,7 @@ export default function RemoveTextDialog({ pdfBytes, onClose, onDone }: Props): 
 
   return (
     <Dialog
-      title="Supprimer un texte récurrent (watermark, mention…)"
+      title="Supprimer un texte récurrent (filigrane, mention…)"
       onClose={onClose}
       width={560}
       footer={
@@ -79,10 +89,10 @@ export default function RemoveTextDialog({ pdfBytes, onClose, onDone }: Props): 
       }
     >
       <p className="text-sm text-black/60 mb-3">
-        Cherche le texte dans tout le PDF et redessine chaque occurrence <strong>en blanc</strong> avec la
-        même police/taille/rotation. Seuls les pixels des <strong>lettres</strong> sont couverts — le
-        contenu autour (tableaux, autres textes) reste visible. Idéal pour effacer des watermarks{' '}
-        <strong>BROUILLON</strong>, <strong>DRAFT</strong>, <strong>COPY</strong>.
+        Le texte est <strong>réellement retiré</strong> du PDF : il n'est plus affiché, plus
+        sélectionnable, plus copiable — aucun rectangle blanc n'est posé par-dessus, donc ce qu'il y
+        a derrière (tableaux, texte, images) réapparaît intact. Idéal pour les filigranes{' '}
+        <strong>BROUILLON</strong>, <strong>DRAFT</strong>, <strong>COPIE</strong>.
       </p>
       <label className="block text-sm font-medium mb-1">Texte à supprimer</label>
       <input
@@ -114,24 +124,44 @@ export default function RemoveTextDialog({ pdfBytes, onClose, onDone }: Props): 
             <span>Aucune occurrence trouvée.</span>
           ) : (
             <>
-              <strong>{previewCount} occurrence{previewCount > 1 ? 's' : ''}</strong> trouvée
-              {previewCount > 1 ? 's' : ''} sur{' '}
-              <strong>{previewPages.length} page{previewPages.length > 1 ? 's' : ''}</strong>
+              <strong>
+                {previewCount} occurrence{previewCount > 1 ? 's' : ''}
+              </strong>{' '}
+              trouvée{previewCount > 1 ? 's' : ''} sur{' '}
+              <strong>
+                {previewPages.length} page{previewPages.length > 1 ? 's' : ''}
+              </strong>
               {previewPages.length <= 10 && (
-                <> (page{previewPages.length > 1 ? 's' : ''} {previewPages.map((p) => p + 1).join(', ')})</>
+                <>
+                  {' '}
+                  (page{previewPages.length > 1 ? 's' : ''}{' '}
+                  {previewPages.map((p) => p + 1).join(', ')})
+                </>
               )}
               .
             </>
           )}
         </div>
       )}
-      {error && (
-        <div className="mt-3 p-3 rounded-md bg-red-50 text-red-700 text-sm">{error}</div>
+      {/* Un PDF dessine souvent une ligne entière d'un seul tenant : on montre
+          exactement ce qui va disparaître avant de lancer la suppression. */}
+      {samples.length > 0 && (
+        <div className="mt-3">
+          <div className="text-xs font-medium text-black/70 mb-1">Ce qui sera supprimé :</div>
+          <ul className="max-h-32 overflow-y-auto rounded-md border border-black/10 divide-y divide-black/5">
+            {samples.map((s, i) => (
+              <li key={i} className="px-3 py-1.5 text-xs font-mono text-black/70 truncate" title={s}>
+                {s.length > 120 ? s.slice(0, 120) + '…' : s}
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-black/40 mt-2">
+            Si un extrait contient plus que le mot cherché, c'est que le PDF dessine toute la ligne
+            d'un bloc : elle partirait en entier. Précise ta recherche dans ce cas.
+          </p>
+        </div>
       )}
-      <p className="text-xs text-black/40 mt-4">
-        💡 Le masquage utilise la police standard la plus proche (Helvetica/Times/Courier). Si l'original
-        utilise une police exotique, des micro-pixels gris peuvent subsister sur les bords des lettres.
-      </p>
+      {error && <div className="mt-3 p-3 rounded-md bg-red-50 text-red-700 text-sm">{error}</div>}
     </Dialog>
   )
 }

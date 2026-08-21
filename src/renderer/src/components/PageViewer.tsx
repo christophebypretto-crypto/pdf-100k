@@ -58,16 +58,29 @@ export default function PageViewer(p: Props): JSX.Element {
   // Flag pour ignorer le scroll listener pendant qu'on scroll programmatiquement
   const programmaticScrollUntil = useRef<number>(0)
 
+  // Position de lecture a restaurer quand le PDF est rechargé en cours de route
+  // (ex : suppression reelle d'un texte) — sinon on serait renvoye en haut du
+  // document a chaque modification.
+  const keepScroll = useRef<number | null>(null)
+
   useEffect(() => {
     let cancelled = false
+    const previous = keepScroll.current
     const copy = p.pdfBytes.slice(0)
-    pdfjsLib
-      .getDocument({ data: copy })
-      .promise.then((d) => {
-        if (!cancelled) setDoc(d)
-      })
+    pdfjsLib.getDocument({ data: copy }).promise.then((d) => {
+      if (cancelled) return
+      setDoc(d)
+      if (previous == null) return
+      // deux frames : le temps que les pages soient montees et mesurees
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (scrollRef.current) scrollRef.current.scrollTop = previous
+        })
+      )
+    })
     return () => {
       cancelled = true
+      keepScroll.current = scrollRef.current?.scrollTop ?? null
       setDoc(null)
     }
   }, [p.pdfBytes])

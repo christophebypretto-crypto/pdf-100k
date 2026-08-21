@@ -21,6 +21,10 @@ export interface TextHit {
   italic: boolean
   // Rotation en degres (convention PDF : counterclockwise positive). 0 = texte horizontal
   rotation: number
+  // Matrice de rendu brute renvoyee par pdfjs, en unites PDF. Sert a retrouver
+  // l'operateur qui dessine ce texte pour le supprimer pour de vrai
+  // (cf. lib/contentTextRemoval).
+  rawTransform: number[]
 }
 
 function classifyFont(name: string): {
@@ -131,7 +135,8 @@ export async function findTextAtPoint(
       fontFamily: cls.family,
       bold: cls.bold,
       italic: cls.italic,
-      rotation: rotationDeg
+      rotation: rotationDeg,
+      rawTransform: [a, b, c, d, e, f]
     }
   }
   return null
@@ -214,7 +219,8 @@ export async function getAllTextItems(
       fontFamily: cls.family,
       bold: cls.bold,
       italic: cls.italic,
-      rotation: rotationDeg
+      rotation: rotationDeg,
+      rawTransform: [a, b, c, d, e, f]
     })
   }
   return result
