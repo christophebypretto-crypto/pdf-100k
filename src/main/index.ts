@@ -157,6 +157,48 @@ function setupAutoUpdater(win: BrowserWindow): void {
   })
 }
 
+/**
+ * Vérification de mise à jour lancée à la main depuis le menu.
+ * Donne toujours une réponse a l'utilisateur — y compris en cas d'echec, sinon
+ * on croit etre a jour alors qu'on ne l'est pas.
+ */
+async function checkForUpdatesFromMenu(): Promise<void> {
+  manualUpdateCheck = true
+  try {
+    const r = await autoUpdater.checkForUpdates()
+    const dispo = r?.updateInfo?.version
+    // checkForUpdates renvoie toujours un updateInfo, y compris quand rien de
+    // neuf : il faut comparer les versions.
+    if (dispo && dispo !== app.getVersion()) {
+      dialog.showMessageBox({
+        type: 'info',
+        title: 'Mise à jour trouvée',
+        message: `Propulse PDF ${dispo} est disponible.`,
+        detail:
+          'Le téléchargement démarre en arrière-plan. Une fenêtre te proposera de redémarrer quand ce sera prêt.'
+      })
+    } else {
+      manualUpdateCheck = false
+      dialog.showMessageBox({
+        type: 'info',
+        message: "L'app est à jour.",
+        detail: `Version installée : ${app.getVersion()}.`
+      })
+    }
+  } catch (e) {
+    manualUpdateCheck = false
+    const res = await dialog.showMessageBox({
+      type: 'warning',
+      message: 'Vérification impossible',
+      detail: `${e instanceof Error ? e.message : String(e)}\n\nTu peux installer la dernière version à la main.`,
+      buttons: ['Ouvrir la page de téléchargement', 'Fermer'],
+      defaultId: 0,
+      cancelId: 1
+    })
+    if (res.response === 0) shell.openExternal(RELEASES_URL)
+  }
+}
+
 function buildAppMenu(): void {
   const isMac = process.platform === 'darwin'
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -169,44 +211,8 @@ function buildAppMenu(): void {
               { type: 'separator' as const },
               {
                 label: 'Vérifier les mises à jour…',
-                click: async () => {
-                  manualUpdateCheck = true
-                  try {
-                    const r = await autoUpdater.checkForUpdates()
-                    const dispo = r?.updateInfo?.version
-                    // checkForUpdates renvoie toujours un updateInfo, y compris
-                    // quand rien de neuf : il faut comparer les versions.
-                    if (dispo && dispo !== app.getVersion()) {
-                      dialog.showMessageBox({
-                        type: 'info',
-                        title: 'Mise à jour trouvée',
-                        message: `Propulse PDF ${dispo} est disponible.`,
-                        detail:
-                          'Le téléchargement démarre en arrière-plan. Une fenêtre te proposera de redémarrer quand ce sera prêt.'
-                      })
-                    } else {
-                      manualUpdateCheck = false
-                      dialog.showMessageBox({
-                        type: 'info',
-                        message: "L'app est à jour.",
-                        detail: `Version installée : ${app.getVersion()}.`
-                      })
-                    }
-                  } catch (e) {
-                    manualUpdateCheck = false
-                    dialog
-                      .showMessageBox({
-                        type: 'warning',
-                        message: 'Vérification impossible',
-                        detail: `${e instanceof Error ? e.message : String(e)}\n\nTu peux installer la dernière version à la main.`,
-                        buttons: ['Ouvrir la page de téléchargement', 'Fermer'],
-                        defaultId: 0,
-                        cancelId: 1
-                      })
-                      .then((res) => {
-                        if (res.response === 0) shell.openExternal(RELEASES_URL)
-                      })
-                  }
+                click: () => {
+                  void checkForUpdatesFromMenu()
                 }
               },
               { type: 'separator' as const },
@@ -224,7 +230,29 @@ function buildAppMenu(): void {
     { role: 'fileMenu' },
     { role: 'editMenu' },
     { role: 'viewMenu' },
-    { role: 'windowMenu' }
+    { role: 'windowMenu' },
+    // Sur macOS l'entree vit dans le menu applicatif ci-dessus. Ailleurs il n'y a
+    // pas de menu applicatif : sans ce menu Aide, aucun moyen de declencher une
+    // verification a la main.
+    ...(isMac
+      ? []
+      : [
+          {
+            label: 'Aide',
+            submenu: [
+              {
+                label: `Version ${app.getVersion()}`,
+                enabled: false
+              },
+              {
+                label: 'Vérifier les mises à jour…',
+                click: (): void => {
+                  void checkForUpdatesFromMenu()
+                }
+              }
+            ]
+          } as Electron.MenuItemConstructorOptions
+        ])
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
@@ -315,6 +343,11 @@ app.whenReady().then(() => {
   })
 
   // Dialogues file I/O
+  // Version affichee en haut a droite de la fenetre. On la lit sur l'app elle-meme
+  // (et pas sur une constante figee au build) : c'est la seule valeur qui
+  // correspond a coup sur au binaire en train de tourner.
+  ipcMain.handle('app:version', () => app.getVersion())
+
   ipcMain.handle('dialog:openPdf', async (_evt, multi: boolean = false) => {
     const result = await dialog.showOpenDialog({
       title: 'Ouvrir un PDF',

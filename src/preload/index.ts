@@ -17,6 +17,8 @@ const api = {
   imageToPdfBytes: (imagePath: string): Promise<ArrayBuffer> =>
     ipcRenderer.invoke('pdf:imageToPdfBytes', imagePath),
 
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
+
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
 
   onFileOpenRequest: (callback: (path: string) => void): (() => void) => {

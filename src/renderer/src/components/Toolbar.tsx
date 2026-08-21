@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Tool } from './Sidebar'
+import AppVersion from './AppVersion'
 
 interface Props {
   filePath: string | null
@@ -87,9 +88,11 @@ export default function Toolbar(p: Props): JSX.Element {
   }, [recentOpen])
 
   return (
-    <header className="shrink-0 bg-white border-b border-black/10">
-      {/* Ligne 1 : fichier + ops PDF + zoom */}
-      <div className="h-12 flex items-center px-3 gap-2">
+    <header className="relative shrink-0 bg-white border-b border-black/10">
+      {/* Version installee, epinglee en haut a droite (cf. AppVersion) */}
+      <AppVersion />
+      {/* Ligne 1 : fichier + ops PDF + zoom — pr-24 reserve la place de la pastille de version */}
+      <div className="h-12 flex items-center px-3 pr-24 gap-2">
         <button
           onClick={p.onNew}
           className={primary}
