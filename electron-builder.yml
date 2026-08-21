@@ -7,6 +7,9 @@ directories:
 files:
   - out/**/*
   - package.json
+# Signe l'app en ad-hoc apres packaging : sans cela macOS la declare
+# « endommagee » des qu'elle passe par un navigateur. Voir build/afterPack.js.
+afterPack: ./build/afterPack.js
 asar: true
 fileAssociations:
   - ext: pdf
