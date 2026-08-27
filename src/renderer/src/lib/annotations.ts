@@ -324,7 +324,12 @@ export async function applyAnnotationsToPdf(
         const bin = atob(b64)
         const bytes = new Uint8Array(bin.length)
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-        img = await doc.embedPng(bytes)
+        // Le format compte : embedPng sur un JPEG echoue. Les signatures sont
+        // toujours en PNG (dessinees sur un canvas), mais l'outil « Image »
+        // accepte aussi des photos JPEG — qu'on garde telles quelles, les
+        // reconvertir en PNG ferait exploser le poids du PDF.
+        const estJpeg = a.dataUrl.startsWith('data:image/jpeg') || a.dataUrl.startsWith('data:image/jpg')
+        img = estJpeg ? await doc.embedJpg(bytes) : await doc.embedPng(bytes)
         imageCache.set(a.dataUrl, img)
       }
       const wPdf = a.w * pw

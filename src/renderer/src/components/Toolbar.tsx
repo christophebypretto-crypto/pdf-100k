@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Tool } from './Sidebar'
 import AppVersion from './AppVersion'
+import { loadImageFile, LoadedImage } from '../lib/imageImport'
 
 interface Props {
   filePath: string | null
@@ -41,6 +42,9 @@ interface Props {
   onSetTextColor: (c: string) => void
   onCreateSignature: () => void
   onClearSignature: () => void
+  pendingImage: LoadedImage | null
+  onImageChosen: (img: LoadedImage) => void
+  onClearImage: () => void
   onOpenRemoveTextDialog: () => void
   onUndo: () => void
   hasAnnotations: boolean
@@ -69,6 +73,8 @@ const HIGHLIGHT_COLORS = ['#FFF200', '#A6E22E', '#FF7AC6', '#5AC8FA', '#FF9500']
 const PEN_COLORS = ['#1A1A1A', '#0C806E', '#E11D48', '#0EA5E9', '#F59E0B']
 
 export default function Toolbar(p: Props): JSX.Element {
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const [imageError, setImageError] = useState<string | null>(null)
   const cls =
     'px-3 py-1.5 rounded-md text-sm font-medium transition-colors border border-transparent'
   const primary = `${cls} bg-pretto text-white hover:bg-pretto/90`
@@ -429,6 +435,62 @@ export default function Toolbar(p: Props): JSX.Element {
               </span>
             </>
           )}
+          {p.tool === 'image' && (
+            <>
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif,image/bmp"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0]
+                  e.target.value = '' // reprendre le meme fichier doit re-declencher
+                  if (!file) return
+                  try {
+                    setImageError(null)
+                    p.onImageChosen(await loadImageFile(file))
+                  } catch (err) {
+                    setImageError(err instanceof Error ? err.message : "Image illisible")
+                  }
+                }}
+              />
+              {p.pendingImage ? (
+                <>
+                  <span className="text-black/60">Image prête :</span>
+                  <img
+                    src={p.pendingImage.dataUrl}
+                    alt=""
+                    className="h-10 bg-white border border-black/10 rounded px-1 object-contain"
+                  />
+                  <span className="text-xs text-black/45">
+                    {p.pendingImage.width} × {p.pendingImage.height} px
+                  </span>
+                  <button
+                    onClick={() => imageInputRef.current?.click()}
+                    className="text-xs text-pretto hover:underline"
+                  >
+                    Changer
+                  </button>
+                  <button onClick={p.onClearImage} className="text-xs text-red-500 hover:underline">
+                    Retirer
+                  </button>
+                  <span className="ml-2 text-xs text-black/50">
+                    Clique sur le document pour la poser · ensuite glisse-la, tire le coin pour
+                    l'agrandir, la poignée du haut pour la pivoter
+                  </span>
+                </>
+              ) : (
+                <>
+                  <button onClick={() => imageInputRef.current?.click()} className={primary}>
+                    Choisir une image…
+                  </button>
+                  <span className="text-xs text-black/50">PNG, JPEG, WebP, GIF ou BMP</span>
+                </>
+              )}
+              {imageError && <span className="text-xs text-red-600">{imageError}</span>}
+            </>
+          )}
+
           {p.tool === 'sign' && (
             <>
               {p.signatureDataUrl ? (

@@ -13,6 +13,7 @@ import { Tool } from './Sidebar'
 import AnnotationContextMenu, { AnnotationAction } from './AnnotationContextMenu'
 import { findTextAtPoint, fontFamilyToCss, getAllTextItems, TextHit } from '../lib/textEdit'
 import { sampleTextColors } from '../lib/colorSample'
+import { taillePose } from '../lib/imageImport'
 
 // Le type TextLayer n'est pas exporte dans les declarations TS de pdfjs-dist 4.x
 // mais existe à runtime ; on l'aliasse en type minimal
@@ -59,6 +60,8 @@ interface Props {
   textSize: number
   textColor: string
   signatureDataUrl: string | null
+  pendingImage: import('../lib/imageImport').LoadedImage | null
+  onPlaceImage: () => void
   onPlaceSignature: () => void
   isCurrent: boolean
   onClick: () => void
@@ -113,6 +116,8 @@ export default function PageCanvas({
   textColor,
   onSetTextSize,
   signatureDataUrl,
+  pendingImage,
+  onPlaceImage,
   onPlaceSignature,
   isCurrent,
   onClick
@@ -396,6 +401,22 @@ export default function PageCanvas({
         dataUrl: signatureDataUrl
       })
       onPlaceSignature()
+    } else if (tool === 'image' && pendingImage) {
+      const p = toNorm(e)
+      // taille de depart proportionnee a l'image ET a la page, puis centree sur
+      // le point clique — et ramenee dans la page si on a clique pres d'un bord
+      const { w, h } = taillePose(pendingImage, pageSize ? pageSize.w / pageSize.h : 1)
+      onAddAnnotation({
+        id: newId(),
+        kind: 'image',
+        pageIndex,
+        x: Math.max(0, Math.min(1 - w, p.x - w / 2)),
+        y: Math.max(0, Math.min(1 - h, p.y - h / 2)),
+        w,
+        h,
+        dataUrl: pendingImage.dataUrl
+      })
+      onPlaceImage()
     }
   }
 
@@ -493,7 +514,8 @@ export default function PageCanvas({
     tool === 'form-text' ||
     tool === 'form-checkbox' ||
     tool === 'eraser' ||
-    (tool === 'sign' && signatureDataUrl !== null)
+    (tool === 'sign' && signatureDataUrl !== null) ||
+    (tool === 'image' && pendingImage !== null)
   const textLayerSelectable =
     !ocrZoneActive &&
     ((tool === 'annotate-highlight' && highlightMode === 'text') ||
@@ -1204,20 +1226,28 @@ function DraggableImageAnnotation({
   onContextMenu
 }: DragImageProps): JSX.Element {
   const dragging = useRef<{
-    mode: 'move' | 'resize'
+    mode: 'move' | 'resize' | 'rotate'
     startX: number
     startY: number
     baseX: number
     baseY: number
     baseW: number
     baseH: number
+    /** rotation au debut du geste, et angle souris correspondant (degres) */
+    baseRotation: number
+    baseAngle: number
   } | null>(null)
+  const boxRef = useRef<HTMLDivElement>(null)
 
-  function startDrag(mode: 'move' | 'resize') {
+  function startDrag(mode: 'move' | 'resize' | 'rotate') {
     return (e: React.MouseEvent) => {
       e.stopPropagation()
       e.preventDefault()
       onSelect()
+      const rect = boxRef.current?.getBoundingClientRect()
+      const centre = rect
+        ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+        : { x: e.clientX, y: e.clientY }
       dragging.current = {
         mode,
         startX: e.clientX,
@@ -1225,13 +1255,23 @@ function DraggableImageAnnotation({
         baseX: a.x,
         baseY: a.y,
         baseW: a.w,
-        baseH: a.h
+        baseH: a.h,
+        baseRotation: a.rotation ?? 0,
+        baseAngle: (Math.atan2(e.clientY - centre.y, e.clientX - centre.x) * 180) / Math.PI
       }
       const onMove = (ev: MouseEvent) => {
         if (!dragging.current) return
         const dx = (ev.clientX - dragging.current.startX) / pageW
         const dy = (ev.clientY - dragging.current.startY) / pageH
-        if (dragging.current.mode === 'move') {
+        if (dragging.current.mode === 'rotate') {
+          const angle = (Math.atan2(ev.clientY - centre.y, ev.clientX - centre.x) * 180) / Math.PI
+          // le repere PDF tourne dans l'autre sens que l'ecran, d'ou le signe
+          let rot = dragging.current.baseRotation - (angle - dragging.current.baseAngle)
+          // Maj enfoncee : on cale sur des multiples de 15°
+          if (ev.shiftKey) rot = Math.round(rot / 15) * 15
+          rot = ((rot % 360) + 360) % 360
+          onUpdate(a.id, { rotation: rot } as Partial<Annotation>)
+        } else if (dragging.current.mode === 'move') {
           onUpdate(a.id, {
             x: Math.max(0, Math.min(1 - dragging.current.baseW, dragging.current.baseX + dx)),
             y: Math.max(0, Math.min(1 - dragging.current.baseH, dragging.current.baseY + dy))
@@ -1271,17 +1311,18 @@ function DraggableImageAnnotation({
         transform: a.rotation ? `rotate(${-a.rotation}deg)` : undefined,
         transformOrigin: '50% 50%'
       }}
+      ref={boxRef}
       onMouseDown={startDrag('move')}
       onContextMenu={(e) => {
         e.preventDefault()
         onSelect()
         onContextMenu(e.clientX, e.clientY, a.id)
       }}
-      title="Glisse pour déplacer · Coin bas-droit pour redimensionner · Clic-droit pour menu"
+      title="Glisse pour déplacer · coin bas-droit pour redimensionner · poignée du haut pour pivoter (Maj = par 15°) · clic-droit pour le menu"
     >
       <img
         src={a.dataUrl}
-        alt="Signature"
+        alt=""
         className="block w-full h-full object-contain select-none pointer-events-none"
         draggable={false}
       />
@@ -1313,8 +1354,22 @@ function DraggableImageAnnotation({
           <div
             onMouseDown={startDrag('resize')}
             className="absolute -bottom-1 -right-1 w-3 h-3 bg-pretto rounded-sm cursor-nwse-resize"
-            title="Redimensionner"
+            title="Redimensionner (les proportions sont conservées)"
           />
+          {/* Poignee de rotation : tige + pastille au-dessus du cadre */}
+          <div className="pointer-events-none absolute -top-5 left-1/2 h-5 w-px -translate-x-1/2 bg-pretto/70" />
+          <div
+            onMouseDown={startDrag('rotate')}
+            className="absolute -top-8 left-1/2 flex h-5 w-5 -translate-x-1/2 cursor-grab items-center justify-center rounded-full bg-pretto text-[10px] text-white shadow-md ring-2 ring-white active:cursor-grabbing"
+            title="Pivoter · maintiens Maj pour te caler par pas de 15°"
+          >
+            ↻
+          </div>
+          {a.rotation ? (
+            <div className="pointer-events-none absolute -bottom-6 left-1/2 -translate-x-1/2 rounded bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white">
+              {Math.round(a.rotation)}°
+            </div>
+          ) : null}
         </>
       )}
     </div>

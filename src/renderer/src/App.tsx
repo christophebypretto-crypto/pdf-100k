@@ -18,6 +18,7 @@ import { Annotation, applyAnnotationsToPdf } from './lib/annotations'
 import { FormField, applyFormFieldsToPdf } from './lib/forms'
 import { ocrOnZone } from './lib/searchable'
 import { removeTextTargets } from './lib/contentTextRemoval'
+import type { LoadedImage } from './lib/imageImport'
 import type { TextHit } from './lib/textEdit'
 
 export default function App(): JSX.Element {
@@ -65,6 +66,9 @@ export default function App(): JSX.Element {
   const [textSize, setTextSize] = useState(14)
   const [textColor, setTextColor] = useState('#1A1A1A')
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null)
+  // Image choisie dans l'outil « Image », en attente d'etre posee sur une page.
+  // Elle reste en memoire apres la pose : on peut en placer plusieurs d'affilee.
+  const [pendingImage, setPendingImage] = useState<LoadedImage | null>(null)
 
   // Ajoute un chemin en tête des récents (dédupe, max 10), persiste en localStorage
   const addRecent = useCallback((path: string) => {
@@ -1005,6 +1009,9 @@ export default function App(): JSX.Element {
         onSetTextColor={setTextColor}
         onCreateSignature={() => setDialog('signature')}
         onClearSignature={() => setSignatureDataUrl(null)}
+        pendingImage={pendingImage}
+        onImageChosen={setPendingImage}
+        onClearImage={() => setPendingImage(null)}
         onOpenRemoveTextDialog={() => setDialog('removeText')}
         onUndo={undoAnnotation}
         hasAnnotations={annotations.length > 0 || formFields.length > 0}
@@ -1083,6 +1090,10 @@ export default function App(): JSX.Element {
                   signatureDataUrl={signatureDataUrl}
                   onPlaceSignature={() => {
                     /* signature reste en mémoire pour placement multiple */
+                  }}
+                  pendingImage={pendingImage}
+                  onPlaceImage={() => {
+                    /* l'image reste en mémoire : on peut en poser plusieurs */
                   }}
                 />
               </main>

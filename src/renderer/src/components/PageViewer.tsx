@@ -49,6 +49,8 @@ interface Props {
   textColor: string
   signatureDataUrl: string | null
   onPlaceSignature: () => void
+  pendingImage: import('../lib/imageImport').LoadedImage | null
+  onPlaceImage: () => void
 }
 
 export default function PageViewer(p: Props): JSX.Element {
@@ -195,6 +197,8 @@ export default function PageViewer(p: Props): JSX.Element {
               textColor={p.textColor}
               signatureDataUrl={p.signatureDataUrl}
               onPlaceSignature={p.onPlaceSignature}
+              pendingImage={p.pendingImage}
+              onPlaceImage={p.onPlaceImage}
               isCurrent={i === p.currentPage}
               onClick={() => p.setCurrentPage(i)}
             />

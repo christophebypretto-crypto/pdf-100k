@@ -5,6 +5,7 @@ export type Tool =
   | 'annotate-text'
   | 'modify-text'
   | 'sign'
+  | 'image'
   | 'eraser'
   | 'ocr'
   | 'form-text'
@@ -31,6 +32,12 @@ const TOOLS: ToolDef[] = [
     hint: 'Clique sur un texte existant pour le modifier (police/taille reprises)'
   },
   { id: 'sign', label: 'Signature', icon: '✍', hint: 'Dessiner ou importer une signature' },
+  {
+    id: 'image',
+    label: 'Image',
+    icon: '🖼',
+    hint: 'Insérer une image (PNG/JPEG) : déplaçable, redimensionnable, pivotable'
+  },
   {
     id: 'eraser',
     label: 'Effacer',
