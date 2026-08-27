@@ -30,9 +30,13 @@ export async function applyFormFieldsToPdf(
   for (const f of fields) {
     const page = pages[f.pageIndex]
     if (!page) continue
-    const { width: pw, height: ph } = page.getSize()
-    const x = f.x * pw
-    const y = ph - (f.y + f.h) * ph
+    // Origine + dimensions sur la CropBox, la boite que pdfjs affiche : une page
+    // ne commence pas forcement en (0,0) (cf. lib/annotations.ts).
+    const boite = page.getCropBox()
+    const pw = boite.width
+    const ph = boite.height
+    const x = boite.x + f.x * pw
+    const y = boite.y + ph - (f.y + f.h) * ph
     const w = f.w * pw
     const h = f.h * ph
 

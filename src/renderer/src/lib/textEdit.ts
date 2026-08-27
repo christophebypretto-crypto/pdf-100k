@@ -51,6 +51,21 @@ function classifyFont(name: string): {
 }
 
 /**
+ * Convertit un point de l'espace PDF vers l'espace ecran normalise [0,1].
+ * Passe par le viewport pdfjs : origine de la CropBox et rotation comprises.
+ */
+function versEcran(
+  viewport: pdfjsLib.PageViewport,
+  x: number,
+  y: number,
+  pageW: number,
+  pageH: number
+): { x: number; y: number } {
+  const [vx, vy] = viewport.convertToViewportPoint(x, y)
+  return { x: vx / pageW, y: vy / pageH }
+}
+
+/**
  * Trouve le texte sous le point clique sur une page.
  * Coords du clic normalisees [0,1] (top-left).
  * Renvoie null si aucun texte trouve a cet endroit.
@@ -66,9 +81,11 @@ export async function findTextAtPoint(
   const tc = await page.getTextContent()
   const pageW = viewport.width
   const pageH = viewport.height
-  // Click en coords PDF (origine bottom-left)
-  const px = clickX * pageW
-  const py = pageH - clickY * pageH
+  // Clic -> espace PDF. On passe par le viewport de pdfjs plutot que par un
+  // simple `pageH - y` : lui seul tient compte de l'origine de la CropBox (elle
+  // n'est PAS toujours en (0,0) — ex. MediaBox [0, 7.83, 595.5, 850.08]) et de
+  // la rotation /Rotate de la page.
+  const [px, py] = viewport.convertToPdfPoint(clickX * pageW, clickY * pageH)
 
   const styles = tc.styles as Record<string, { fontFamily?: string }>
 
@@ -111,10 +128,12 @@ export async function findTextAtPoint(
       { x: e + h * vx, y: f + h * vy }, // top-left
       { x: e + w * ux + h * vx, y: f + w * uy + h * vy } // top-right
     ]
-    const minX = Math.min(...corners.map((p) => p.x))
-    const maxX = Math.max(...corners.map((p) => p.x))
-    const minY = Math.min(...corners.map((p) => p.y))
-    const maxY = Math.max(...corners.map((p) => p.y))
+    const ecran = corners.map((p) => versEcran(viewport, p.x, p.y, pageW, pageH))
+    const minX = Math.min(...ecran.map((p) => p.x))
+    const maxX = Math.max(...ecran.map((p) => p.x))
+    const minY = Math.min(...ecran.map((p) => p.y))
+    const maxY = Math.max(...ecran.map((p) => p.y))
+    const base = versEcran(viewport, e, f, pageW, pageH)
 
     const fontSize = scaleX
     const fontName = item.fontName || ''
@@ -123,12 +142,12 @@ export async function findTextAtPoint(
 
     return {
       text: item.str,
-      x: minX / pageW,
-      y: (pageH - maxY) / pageH,
-      width: (maxX - minX) / pageW,
-      height: (maxY - minY) / pageH,
-      baselineX: e / pageW,
-      baselineY: (pageH - f) / pageH,
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+      baselineX: base.x,
+      baselineY: base.y,
       textWidth: w / pageW,
       textHeight: h / pageH,
       fontSize,
@@ -194,10 +213,12 @@ export async function getAllTextItems(
       { x: e + h * vx, y: f + h * vy },
       { x: e + w * ux + h * vx, y: f + w * uy + h * vy }
     ]
-    const minX = Math.min(...corners.map((p) => p.x))
-    const maxX = Math.max(...corners.map((p) => p.x))
-    const minY = Math.min(...corners.map((p) => p.y))
-    const maxY = Math.max(...corners.map((p) => p.y))
+    const ecran = corners.map((p) => versEcran(viewport, p.x, p.y, pageW, pageH))
+    const minX = Math.min(...ecran.map((p) => p.x))
+    const maxX = Math.max(...ecran.map((p) => p.x))
+    const minY = Math.min(...ecran.map((p) => p.y))
+    const maxY = Math.max(...ecran.map((p) => p.y))
+    const base = versEcran(viewport, e, f, pageW, pageH)
 
     const rotationDeg = (Math.atan2(b, a) * 180) / Math.PI
     const fontSize = scaleX
@@ -207,12 +228,12 @@ export async function getAllTextItems(
 
     result.push({
       text: item.str,
-      x: minX / pageW,
-      y: (pageH - maxY) / pageH,
-      width: (maxX - minX) / pageW,
-      height: (maxY - minY) / pageH,
-      baselineX: e / pageW,
-      baselineY: (pageH - f) / pageH,
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+      baselineX: base.x,
+      baselineY: base.y,
       textWidth: w / pageW,
       textHeight: h / pageH,
       fontSize,

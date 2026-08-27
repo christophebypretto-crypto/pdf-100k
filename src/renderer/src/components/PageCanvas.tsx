@@ -863,82 +863,137 @@ export default function PageCanvas({
       )}
 
       {/* Editeur "Modifier texte" — apparait sur clic d'un texte du PDF */}
-      {modifyEditor && pageSize && (
-        <div
-          className="absolute"
-          style={{
-            left: modifyEditor.hit.x * pageSize.w,
-            top: modifyEditor.hit.y * pageSize.h,
-            zIndex: 25
-          }}
-        >
-          <textarea
-            ref={(el) => {
-              if (el && document.activeElement !== el) {
-                requestAnimationFrame(() => {
-                  el.focus()
-                  el.setSelectionRange(0, el.value.length)
-                })
+      {modifyEditor &&
+        pageSize &&
+        (() => {
+          const hit = modifyEditor.hit
+          const fs = hit.fontSize * scale
+          const bg = modifyEditor.colors?.background ?? '#FFFFFF'
+
+          // Distance du haut de la ligne CSS a la ligne de base, en em.
+          // C'est ce qui permet de poser l'editeur PILE sur le texte d'origine :
+          // pdfjs donne la ligne de base, le navigateur raisonne en haut de ligne.
+          // Valeurs MESUREES dans Chromium avec les piles de polices reelles
+          // (cf. fontFamilyToCss), et non des metriques theoriques.
+          const RATIO_BASELINE = { helvetica: 0.8375, times: 0.8375, courier: 0.7625 }
+          const BORDURE = 2
+
+          const baseline = hit.baselineY * pageSize.h
+          const gauche = hit.x * pageSize.w
+          const hautTexte = baseline - RATIO_BASELINE[hit.fontFamily] * fs
+          // Le cache doit couvrir les jambages (g, p, q) du texte d'origine.
+          const cacheTop = baseline - fs * 0.9
+          const cacheH = fs * 1.2
+          const cacheW = Math.max(hit.width * pageSize.w, 4) + 3
+
+          const tourne = Math.abs(hit.rotation) > 0.5
+          const pivot = tourne
+            ? {
+                transform: `rotate(${-hit.rotation}deg)`,
+                transformOrigin: `0px ${baseline - hautTexte + BORDURE}px`
               }
-            }}
-            rows={1}
-            value={modifyEditor.draft}
-            onChange={(e) =>
-              setModifyEditor({ ...modifyEditor, draft: e.target.value })
-            }
-            onBlur={() => {
-              if (modifyEditor.draft !== modifyEditor.hit.text) {
-                onCommitModifyText(
-                  pageIndex,
-                  modifyEditor.hit,
-                  modifyEditor.draft,
-                  modifyEditor.colors
-                )
-              }
-              setModifyEditor(null)
-            }}
-            onKeyDown={(e) => {
-              e.stopPropagation()
-              if (e.key === 'Escape') {
-                setModifyEditor(null)
-              } else if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                if (modifyEditor.draft !== modifyEditor.hit.text) {
-                  onCommitModifyText(
-                    pageIndex,
-                    modifyEditor.hit,
-                    modifyEditor.draft,
-                    modifyEditor.colors
-                  )
-                }
-                setModifyEditor(null)
-              }
-              // Shift+Enter = nouvelle ligne (comportement default)
-            }}
-            className="border-2 border-pretto rounded-sm outline-none shadow-lg resize-none whitespace-nowrap"
-            style={{
-              fontFamily: fontFamilyToCss(modifyEditor.hit.fontFamily),
-              fontSize: modifyEditor.hit.fontSize * scale,
-              fontWeight: modifyEditor.hit.bold ? 'bold' : 'normal',
-              fontStyle: modifyEditor.hit.italic ? 'italic' : 'normal',
-              // WYSIWYG : couleur de texte + fond echantillonnes sur l'original
-              color: modifyEditor.colors?.text ?? '#000000',
-              backgroundColor: modifyEditor.colors?.background ?? '#FFFFFF',
-              minWidth: modifyEditor.hit.width * pageSize.w + 40,
-              padding: '0 2px',
-              lineHeight: '1',
-              boxSizing: 'content-box',
-              height: modifyEditor.hit.fontSize * scale * 1.25
-            }}
-          />
-          <div className="text-[10px] text-white bg-pretto/90 mt-1 px-1.5 py-0.5 rounded inline-block">
-            Entrée valider · Maj+Entrée nouvelle ligne · Echap annuler · Police{' '}
-            {modifyEditor.hit.fontFamily}
-            {modifyEditor.hit.bold ? ' bold' : ''}
-            {modifyEditor.hit.italic ? ' italic' : ''} {Math.round(modifyEditor.hit.fontSize)}pt
-          </div>
-        </div>
-      )}
+            : undefined
+
+          const valider = (): void => {
+            onCommitModifyText(pageIndex, hit, modifyEditor.draft, modifyEditor.colors)
+            setModifyEditor(null)
+          }
+
+          return (
+            <>
+              {/* Cache couleur-fond : masque le texte d'origine pendant l'edition,
+                  sinon on lit les deux en meme temps (l'ancien depassant sous
+                  l'editeur). C'est ce qui donne l'impression d'editer en place. */}
+              <div
+                className="absolute pointer-events-none"
+                style={{
+                  left: gauche - 1,
+                  top: cacheTop,
+                  width: cacheW,
+                  height: cacheH,
+                  backgroundColor: bg,
+                  zIndex: 24,
+                  ...(tourne
+                    ? {
+                        transform: `rotate(${-hit.rotation}deg)`,
+                        transformOrigin: `1px ${baseline - cacheTop}px`
+                      }
+                    : {})
+                }}
+              />
+              <div
+                className="absolute"
+                style={{
+                  left: gauche,
+                  top: hautTexte - BORDURE,
+                  zIndex: 25,
+                  ...pivot
+                }}
+              >
+                <textarea
+                  ref={(el) => {
+                    if (el && document.activeElement !== el) {
+                      requestAnimationFrame(() => {
+                        el.focus()
+                        el.setSelectionRange(0, el.value.length)
+                      })
+                    }
+                  }}
+                  rows={1}
+                  value={modifyEditor.draft}
+                  onChange={(e) => setModifyEditor({ ...modifyEditor, draft: e.target.value })}
+                  onBlur={() => {
+                    if (modifyEditor.draft !== hit.text) valider()
+                    else setModifyEditor(null)
+                  }}
+                  onKeyDown={(e) => {
+                    e.stopPropagation()
+                    if (e.key === 'Escape') {
+                      setModifyEditor(null)
+                    } else if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      if (modifyEditor.draft !== hit.text) valider()
+                      else setModifyEditor(null)
+                    }
+                    // Maj+Entree = nouvelle ligne (comportement par defaut)
+                  }}
+                  className="border-2 border-pretto/70 rounded-sm outline-none resize-none whitespace-nowrap"
+                  style={{
+                    fontFamily: fontFamilyToCss(hit.fontFamily),
+                    fontSize: fs,
+                    fontWeight: hit.bold ? 'bold' : 'normal',
+                    fontStyle: hit.italic ? 'italic' : 'normal',
+                    color: modifyEditor.colors?.text ?? '#000000',
+                    // Fond transparent : le cache derriere fait deja le travail, et
+                    // on evite ainsi de recouvrir ce qui se trouve a droite.
+                    backgroundColor: 'transparent',
+                    minWidth: cacheW,
+                    padding: 0,
+                    lineHeight: '1',
+                    boxSizing: 'content-box',
+                    height: fs * 1.25,
+                    overflow: 'hidden'
+                  }}
+                />
+                <div className="mt-1 flex items-center gap-2 whitespace-nowrap">
+                  <button
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={valider}
+                    className="rounded bg-pretto px-1.5 py-0.5 text-[10px] text-white hover:bg-pretto/90"
+                    title="Transforme ce texte en bloc déplaçable : tu pourras ensuite le glisser où tu veux"
+                  >
+                    ✥ Détacher pour déplacer
+                  </button>
+                  <span className="rounded bg-pretto/90 px-1.5 py-0.5 text-[10px] text-white">
+                    Entrée valider · Echap annuler · {hit.fontFamily}
+                    {hit.bold ? ' bold' : ''}
+                    {hit.italic ? ' italic' : ''} {Math.round(hit.fontSize)}pt
+                  </span>
+                </div>
+              </div>
+            </>
+          )
+        })()}
 
       {/* Menu contextuel sur clic-droit d'une annotation */}
       {contextMenu && (

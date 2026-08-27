@@ -89,9 +89,6 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
 }
 
 // Convertit y "top-left normalise" → coord PDF "bottom-left en points"
-function toPdfY(yNorm: number, pageHeight: number): number {
-  return (1 - yNorm) * pageHeight
-}
 
 /**
  * Pour rotation autour du CENTRE : calcule le bottom-left a passer a pdf-lib
@@ -169,7 +166,26 @@ export async function applyAnnotationsToPdf(
   for (const a of annotations) {
     const page = pages[a.pageIndex]
     if (!page) continue
-    const { width: pw, height: ph } = page.getSize()
+    // Une page ne commence pas forcement en (0,0) : sa boite peut etre decalee.
+    // Vu en vrai sur une attestation signee YouSign : MediaBox
+    // [0, 7.83, 595.5, 850.08]. Sans tenir compte de l'origine, toutes les
+    // annotations se posent decalees d'autant.
+    //
+    // Origine ET dimensions viennent de la MEME boite, la CropBox : c'est celle
+    // que pdfjs utilise pour afficher la page, donc celle dans laquelle
+    // l'utilisateur a clique. `page.getSize()` ne donnerait que les dimensions
+    // de la MediaBox en jetant son origine — melanger les deux rouvrirait le
+    // meme bug des que les deux boites different.
+    const boite = page.getCropBox()
+    const pw = boite.width
+    const ph = boite.height
+    const ox = boite.x
+    const oy = boite.y
+    /** x normalise -> x absolu dans l'espace PDF */
+    const px = (xNorm: number): number => ox + xNorm * pw
+    /** y normalise (origine en haut) -> y absolu dans l'espace PDF */
+    const toPdfY = (yNorm: number, pageHeight: number): number =>
+      oy + pageHeight - yNorm * pageHeight
     const rotation = page.getRotation().angle % 360
 
     if (a.kind === 'highlight') {
@@ -179,7 +195,7 @@ export async function applyAnnotationsToPdf(
       const rotDeg = a.rotation || 0
       if (Math.abs(rotDeg) > 0.001) {
         // Rotation autour du centre
-        const cx = (a.rect.x + a.rect.w / 2) * pw
+        const cx = px(a.rect.x + a.rect.w / 2)
         const cy = toPdfY(a.rect.y + a.rect.h / 2, ph)
         const bl = bottomLeftForCenterRotation(cx, cy, wPdf, hPdf, rotDeg)
         page.drawRectangle({
@@ -193,7 +209,7 @@ export async function applyAnnotationsToPdf(
         })
       } else {
         page.drawRectangle({
-          x: a.rect.x * pw,
+          x: px(a.rect.x),
           y: toPdfY(a.rect.y + a.rect.h, ph),
           width: wPdf,
           height: hPdf,
@@ -208,8 +224,8 @@ export async function applyAnnotationsToPdf(
         const p1 = pts[i - 1]
         const p2 = pts[i]
         page.drawLine({
-          start: { x: p1.x * pw, y: toPdfY(p1.y, ph) },
-          end: { x: p2.x * pw, y: toPdfY(p2.y, ph) },
+          start: { x: px(p1.x), y: toPdfY(p1.y, ph) },
+          end: { x: px(p2.x), y: toPdfY(p2.y, ph) },
           thickness: a.width,
           color: rgb(c.r, c.g, c.b),
           opacity: 0.9
@@ -227,7 +243,7 @@ export async function applyAnnotationsToPdf(
         if (a.rotation !== undefined && Math.abs(a.rotation) > 0.001) {
           // pivot = baseline-left (br.x, br.y), le rect monte vers le haut et tourne
           page.drawRectangle({
-            x: br.x * pw,
+            x: px(br.x),
             y: toPdfY(br.y, ph),
             width: br.w * pw,
             height: br.h * ph,
@@ -238,7 +254,7 @@ export async function applyAnnotationsToPdf(
         } else {
           // br.x/br.y = top-left
           page.drawRectangle({
-            x: br.x * pw,
+            x: px(br.x),
             y: toPdfY(br.y + br.h, ph),
             width: br.w * pw,
             height: br.h * ph,
@@ -252,7 +268,7 @@ export async function applyAnnotationsToPdf(
         // Mode baseline-left activé dès que rotation est defini (peut être 0)
         // Rotated: (x, y) = baseline-left ; multi-lignes peu probable mais on supporte
         const lines = a.text.split('\n')
-        const xBase = a.x * pw
+        const xBase = px(a.x)
         const yBase = toPdfY(a.y, ph)
         lines.forEach((ln, i) => {
           // Decale chaque ligne sur l'axe perpendiculaire a la rotation
@@ -272,7 +288,7 @@ export async function applyAnnotationsToPdf(
         const lines = a.text.split('\n')
         const lineHeight = a.size * 1.25
         lines.forEach((ln, i) => {
-          const x = a.x * pw
+          const x = px(a.x)
           // y top-left de la 1ere ligne → on baisse de fontHeight pour la baseline
           const y = toPdfY(a.y, ph) - a.size - i * lineHeight
           page.drawText(ln, {
@@ -290,7 +306,7 @@ export async function applyAnnotationsToPdf(
       const c = hexToRgb(a.color || '#FFFFFF')
       if (a.rotation !== undefined && Math.abs(a.rotation) > 0.001) {
         // rect.x/y = pivot (baseline-left), rect.w/h = dimensions ; rect "monte" depuis le pivot
-        const x = a.rect.x * pw
+        const x = px(a.rect.x)
         const y = toPdfY(a.rect.y, ph) // pivot Y en PDF
         const w = a.rect.w * pw
         const h = a.rect.h * ph
@@ -304,7 +320,7 @@ export async function applyAnnotationsToPdf(
           rotate: degrees(a.rotation)
         })
       } else {
-        const x = a.rect.x * pw
+        const x = px(a.rect.x)
         const y = toPdfY(a.rect.y + a.rect.h, ph)
         const w = a.rect.w * pw
         const h = a.rect.h * ph
@@ -336,7 +352,7 @@ export async function applyAnnotationsToPdf(
       const hPdf = a.h * ph
       const rotDeg = a.rotation || 0
       if (Math.abs(rotDeg) > 0.001) {
-        const cx = (a.x + a.w / 2) * pw
+        const cx = px(a.x + a.w / 2)
         const cy = toPdfY(a.y + a.h / 2, ph)
         const bl = bottomLeftForCenterRotation(cx, cy, wPdf, hPdf, rotDeg)
         page.drawImage(img, {
@@ -348,7 +364,7 @@ export async function applyAnnotationsToPdf(
         })
       } else {
         page.drawImage(img, {
-          x: a.x * pw,
+          x: px(a.x),
           y: toPdfY(a.y + a.h, ph),
           width: wPdf,
           height: hPdf

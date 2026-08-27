@@ -159,15 +159,19 @@ export async function makeSearchablePdf(
     })
 
     const page = pages[idx]
-    const { width: pw, height: ph } = page.getSize()
+    // Le canvas OCR est rendu par pdfjs, donc dans le repere de la CropBox :
+    // c'est sur elle qu'il faut recaler le texte invisible, origine comprise.
+    const boite = page.getCropBox()
+    const pw = boite.width
+    const ph = boite.height
     const sx = pw / canvas.width
     const sy = ph / canvas.height
 
     for (const w of ocr.words) {
       if (!w.text.trim() || w.confidence < 30) continue
-      const x = w.bbox.x0 * sx
-      const yTopPdf = ph - w.bbox.y0 * sy
-      const yBotPdf = ph - w.bbox.y1 * sy
+      const x = boite.x + w.bbox.x0 * sx
+      const yTopPdf = boite.y + ph - w.bbox.y0 * sy
+      const yBotPdf = boite.y + ph - w.bbox.y1 * sy
       const fontSize = Math.max(1, yTopPdf - yBotPdf)
       page.drawText(w.text, {
         x,
